@@ -7,6 +7,8 @@ Abre la página en un PC, copia el enlace, ábrelo en el otro PC y arrastra arch
 ```
 index.html        Interfaz y lógica de conexión y transferencia
 api/config.js     Función de Vercel que entrega los servidores STUN/TURN
+api/relay.js      Sala en la nube (plan B) sobre Vercel Blob
+package.json      Dependencia @vercel/blob (Vercel la instala sola)
 ```
 
 ## Publicar en Vercel
@@ -31,6 +33,21 @@ En el panel de Cloudflare: Realtime → TURN Server → crear clave.
 **Opción C, servidor propio (coturn)**
 - `TURN_URLS` = `turn:mi-servidor.com:3478,turns:mi-servidor.com:5349`
 - `TURN_USERNAME`, `TURN_CREDENTIAL`
+
+## Plan B: sala en la nube (Vercel Blob)
+
+Si los PC no logran conectarse directo, en la misma página hay una sección "Sala en la nube". Un PC sube el archivo y el otro lo ve aparecer en su lista (se actualiza cada 6 segundos) y lo descarga. Acepta cualquier tipo de archivo, se sube en partes de 4 MB con reintentos y se verifica con SHA-256 al descargar.
+
+Para activarla, una sola vez:
+1. En Vercel abre el proyecto, pestaña **Storage**, **Create Database**, elige **Blob** y créalo (público o privado, funcionan ambos).
+2. Conéctalo al proyecto. Vercel añade sola la variable `BLOB_READ_WRITE_TOKEN`.
+3. Ve a Deployments y haz **Redeploy**.
+
+Variables opcionales:
+- `RELAY_MAX_MB` tamaño máximo por archivo (por defecto 100)
+- `RELAY_TTL_HOURS` horas antes del borrado automático (por defecto 24)
+
+Los archivos solo los ve quien tenga el enlace de la sala. Cualquiera en la sala puede borrarlos con el botón Borrar. La limpieza de archivos vencidos se hace cada vez que alguien abre la sala. Revisa en el panel de Vercel los límites de almacenamiento de tu plan.
 
 ## Cómo comprobar que funciona
 
