@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Túnel · Pasa archivos de un PC a otro</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌀</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --night:#15123a; --deep:#0e0c28; --panel:#1f1b4d; --line:#342e72;
+  --text:#ece9ff; --soft:#a9a3d9; --violet:#8b7bff; --teal:#3fd6c6;
+  --amber:#ffb547; --rose:#ff6b81;
+  --state:var(--violet);
+  --display:"Unbounded","Trebuchet MS",system-ui,sans-serif;
+  --body:"Figtree","Segoe UI",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  background:radial-gradient(1200px 700px at 80% -10%,#2a2170 0%,transparent 60%),var(--deep);
+  color:var(--text);font:16px/1.5 var(--body);
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0);
+}
+body[data-state="connected"]{--state:var(--teal)}
+body[data-state="waiting"],body[data-state="linked"]{--state:var(--amber)}
+body[data-state="error"]{--state:var(--rose)}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:26px}
+.brand h1{font:700 30px/1 var(--display);margin:0;letter-spacing:-.5px}
+.brand p{margin:6px 0 0;color:var(--soft);font-size:15px}
+button{font:600 15px var(--body);cursor:pointer;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:10px 16px}
+button:hover:not(:disabled){border-color:var(--violet)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible,.drop:focus-within{outline:2px solid var(--teal);outline-offset:2px}
+.primary{background:var(--violet);border-color:var(--violet);color:#120f33}
+.sm{padding:6px 12px;font-size:14px;border-radius:10px}
+.card{background:linear-gradient(180deg,#1d1948,#191540);border:1px solid var(--line);border-radius:22px;padding:22px;margin-bottom:18px}
+h3{font:600 17px var(--body);margin:0 0 12px}
+
+/* Estado + agujero de gusano */
+.status{display:grid;grid-template-columns:190px 1fr;gap:26px;align-items:center;border-radius:28px}
+.hole{position:relative;width:170px;height:170px;margin:auto}
+.hole i{position:absolute;inset:0;border-radius:50%;border:2px solid var(--state);opacity:.8;transition:border-color .4s}
+.hole i:nth-child(2){inset:22px;opacity:.55}
+.hole i:nth-child(3){inset:44px;opacity:.35}
+.hole b{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 70%,var(--state) 100%);-webkit-mask:radial-gradient(circle,transparent 58%,#000 60%);mask:radial-gradient(circle,transparent 58%,#000 60%);animation:spin 2.4s linear infinite}
+body[data-state="connected"] .hole b{animation-duration:1.1s}
+body[data-state="error"] .hole b{animation:none;opacity:.5}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pill{display:inline-block;font-size:13px;font-weight:600;padding:4px 12px;border-radius:99px;background:color-mix(in srgb,var(--state) 22%,transparent);color:var(--state);border:1px solid color-mix(in srgb,var(--state) 55%,transparent)}
+#stText{font:500 21px/1.3 var(--display);margin:10px 0 16px}
+.devices{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dev{background:var(--night);border:1px solid var(--line);border-radius:14px;padding:8px 14px;min-width:170px}
+.dev small{display:block;color:var(--soft);font-size:12.5px}
+.dev strong{font-weight:600}
+#otherDev.on{border-color:var(--teal);box-shadow:0 0 0 3px color-mix(in srgb,var(--teal) 25%,transparent)}
+.link-line{flex:1;min-width:30px;height:2px;background:var(--line);position:relative;overflow:hidden;border-radius:2px}
+body[data-state="connected"] .link-line span{position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--teal),transparent);animation:flow 1.4s linear infinite}
+@keyframes flow{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0 0}
+.facts div{min-width:0}
+.facts dt{color:var(--soft);font-size:12.5px}
+.facts dd{margin:2px 0 0;font-weight:600;font-size:14px;overflow-wrap:anywhere}
+
+/* Compartir */
+.share{display:flex;gap:22px;align-items:center;justify-content:space-between}
+.share-main{flex:1;min-width:0}
+.linkbox{display:flex;gap:8px}
+.linkbox input{flex:1;min-width:0;background:var(--night);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:10px 12px;font:14px var(--body)}
+.hint{color:var(--soft);font-size:14px;margin:10px 0 0}
+.hint code{color:var(--text);font-weight:600;font-family:var(--body);letter-spacing:.5px}
+.qr{background:#fff;padding:8px;border-radius:14px;line-height:0}
+.qr:empty{display:none}
+
+/* Envío */
+.drop{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:34px 16px;border:2px dashed var(--line);border-radius:18px;cursor:pointer;transition:border-color .2s,background .2s}
+.drop:hover,.drop.over{border-color:var(--teal);background:color-mix(in srgb,var(--teal) 7%,transparent)}
+.drop strong{font-size:17px}
+.drop span{color:var(--soft);font-size:14px}
+.drop .fake{margin-top:8px;background:var(--violet);color:#120f33;font-weight:600;padding:9px 18px;border-radius:12px}
+.drop-ico{font-size:30px;line-height:1;color:var(--teal)!important}
+
+/* Listas */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid2 .card{margin:0}
+.list-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.list-head h3{margin:0}
+.list-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chk{font-size:13.5px;color:var(--soft);display:flex;gap:6px;align-items:center;cursor:pointer}
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.empty{color:var(--soft);font-size:14px;padding:14px 0}
+.item{background:var(--night);border:1px solid var(--line);border-radius:14px;padding:12px}
+.item.ok{border-color:color-mix(in srgb,var(--teal) 60%,var(--line))}
+.item.bad{border-color:color-mix(in srgb,var(--rose) 60%,var(--line))}
+.row{display:flex;gap:12px;align-items:center}
+.ext{flex:none;width:44px;height:44px;border-radius:10px;display:grid;place-items:center;font:700 11px var(--display);background:#2b2566;color:var(--violet)}
+.ext.xls{background:#123f3a;color:#5fe3b0}
+.ext.pdf{background:#4a1a2a;color:#ff8fa3}
+.meta{flex:1;min-width:0}
+.name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{font-size:13px;color:var(--soft)}
+.st.good{color:var(--teal)} .st.warn{color:var(--amber)} .st.err{color:var(--rose)}
+.bar{position:relative;height:6px;border-radius:6px;background:#2a255e;margin-top:10px;overflow:hidden}
+.bar i{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:6px;transition:width .15s linear}
+.bar .b1{background:color-mix(in srgb,var(--violet) 55%,transparent)}
+.bar .b2{background:var(--teal)}
+.legend{font-size:12px;color:var(--soft);margin-top:6px;display:flex;justify-content:space-between;gap:8px}
+
+details.log summary{cursor:pointer;font-weight:600}
+#log{margin:12px 0 0;max-height:260px;overflow:auto;font:12.5px/1.55 ui-monospace,Consolas,monospace;color:var(--soft);white-space:pre-wrap}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--panel);border:1px solid var(--teal);padding:10px 18px;border-radius:12px;opacity:0;pointer-events:none;transition:opacity .25s}
+.toast.show{opacity:1}
+
+@media (max-width:760px){
+  .status{grid-template-columns:1fr}
+  .hole{width:130px;height:130px}
+  .facts{grid-template-columns:1fr 1fr}
+  .share{flex-direction:column;align-items:stretch}
+  .qr{align-self:center}
+  .grid2{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body data-state="connecting">
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Túnel</h1>
+      <p>Pasa archivos de un PC a otro en tiempo real, directo y cifrado.</p>
+    </div>
+    <button id="newRoom">Nueva sala</button>
+  </header>
+
+  <section class="card status" aria-live="polite">
+    <div class="hole" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
+    <div>
+      <span class="pill" id="stPill">Iniciando</span>
+      <h2 id="stText">Preparando la sala…</h2>
+      <div class="devices">
+        <div class="dev"><small>Este PC</small><strong id="meName"></strong></div>
+        <div class="link-line"><span></span></div>
+        <div class="dev" id="otherDev"><small>Otro PC</small><strong id="otherName">Sin conectar</strong></div>
+      </div>
+      <dl class="facts">
+        <div><dt>Ruta</dt><dd id="fRoute">Sin conexión</dd></div>
+        <div><dt>Latencia</dt><dd id="fRtt">Sin datos</dd></div>
+        <div><dt>Papel</dt><dd id="fRole">Sin asignar</dd></div>
+        <div><dt>Servidor de relé</dt><dd id="fTurn">Cargando</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="card share">
+    <div class="share-main">
+      <h3>Abre este enlace en el otro PC</h3>
+      <div class="linkbox">
+        <input id="shareLink" readonly aria-label="Enlace de la sala">
+        <button id="copyBtn">Copiar enlace</button>
+      </div>
+      <p class="hint">Sala <code id="roomCode"></code>. Funciona aunque los dos PC estén en redes distintas.</p>
+    </div>
+    <div id="qr" class="qr" aria-label="Código QR del enlace"></div>
+  </section>
+
+  <section class="card">
+    <h3>Envía archivos</h3>
+    <label id="drop" class="drop">
+      <input type="file" id="fileInput" multiple hidden>
+      <span class="drop-ico" aria-hidden="true">⇪</span>
+      <strong>Arrastra archivos aquí</strong>
+      <span id="dropHint">Cualquier tipo: Excel, Word, PDF, imágenes, ZIP. Se envían en cuanto el otro PC esté conectado.</span>
+      <span class="fake">Elegir archivos</span>
+    </label>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <div class="list-head"><h3>Enviados</h3></div>
+      <ul id="outList" class="list"><li class="empty">Aquí verás cada archivo enviado y si el otro PC lo recibió.</li></ul>
+    </div>
+    <div class="card">
+      <div class="list-head">
+        <h3>Recibidos</h3>
+        <div class="list-tools">
+          <label class="chk"><input type="checkbox" id="autoDl"> Descargar al llegar</label>
+          <button id="dlAll" class="sm" disabled>Descargar todos</button>
+        </div>
+      </div>
+      <ul id="inList" class="list"><li class="empty">Los archivos del otro PC aparecerán aquí listos para descargar.</li></ul>
+    </div>
+  </section>
+
+  <details class="card log" style="margin-top:18px">
+    <summary>Diagnóstico de conexión</summary>
+    <pre id="log"></pre>
+  </details>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+"use strict";
+/* ============ Configuración ============ */
+const PREFIX = "tunel-v3-";
+const CHUNK_MAX = 64 * 1024;          // tamaño máximo de cada fragmento
+const READ_BLOCK = 1024 * 1024;        // se lee el archivo de 1 MB en 1 MB
+const BUFFER_HIGH = 2 * 1024 * 1024;   // control de flujo del canal
+const BUFFER_LOW = 512 * 1024;
+const ACK_EVERY = 512 * 1024;          // el receptor confirma cada 512 KB
+const HASH_LIMIT = 300 * 1024 * 1024;  // verificación SHA-256 hasta 300 MB
+const HEARTBEAT_MS = 4000, DEAD_MS = 25000, OPEN_TIMEOUT = 20000, RETRY_MS = 3000;
+
+const FALLBACK_ICE = [
+  { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
+  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"],
+    username: "openrelayproject", credential: "openrelayproject" }
+];
+
+const $ = s => document.querySelector(s);
+const S = {
+  room: null, peer: null, conn: null, role: null,
+  iceServers: FALLBACK_ICE, peerOpts: {}, turnSource: "respaldo público",
+  outQueue: [], sending: false, incoming: null,
+  items: new Map(), remoteName: null, lastSeen: 0,
+  timers: { retry: 0, open: 0, beat: 0 },
+  myName: deviceName(),
+  forceRelay: new URLSearchParams(location.search).has("relay")
+};
+const waiters = new Map();
+
+/* ============ Utilidades ============ */
+function randomId(n) {
+  const abc = "abcdefghjkmnpqrstuvwxyz23456789";
+  const a = crypto.getRandomValues(new Uint8Array(n));
+  return Array.from(a, x => abc[x % abc.length]).join("");
+}
+function deviceName() {
+  const u = navigator.userAgent;
+  const os = /Windows/.test(u) ? "Windows" : /Android/.test(u) ? "Android" : /iPhone|iPad/.test(u) ? "iPhone/iPad"
+    : /Mac OS X/.test(u) ? "Mac" : /Linux/.test(u) ? "Linux" : "Equipo";
+  const br = /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Firefox\//.test(u) ? "Firefox"
+    : /Chrome\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "navegador";
+  return `${os} con ${br}`;
+}
+function fmtBytes(b) {
+  if (!b) return "0 B";
+  const u = ["B", "KB", "MB", "GB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return `${b.toFixed(i && b < 10 ? 1 : 0)} ${u[i]}`;
+}
+function extOf(name) { const m = /\.([a-z0-9]{1,5})$/i.exec(name || ""); return m ? m[1].toLowerCase() : "?"; }
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  const el = $("#log");
+  el.textContent = `[${t}] ${msg}\n` + el.textContent.slice(0, 20000);
+  console.log("[Túnel]", msg);
+}
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2600); }
+async function sha256(blobOrFile) {
+  if (!crypto.subtle) return null;
+  const buf = await blobOrFile.arrayBuffer();
+  const h = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(h), x => x.toString(16).padStart(2, "0")).join("");
+}
+
+/* ============ Estado visible ============ */
+const LABELS = { connecting: "Conectando", waiting: "Esperando", linked: "Enlazando", connected: "Conectado", error: "Problema de red" };
+function setStatus(kind, text) {
+  document.body.dataset.state = kind;
+  $("#stPill").textContent = LABELS[kind] || kind;
+  $("#stText").textContent = text;
+  const on = kind === "connected";
+  $("#otherDev").classList.toggle("on", on);
+  $("#otherName").textContent = on && S.remoteName ? S.remoteName : (kind === "linked" ? "Identificando…" : "Sin conectar");
+  if (!on && kind !== "linked") { $("#fRoute").textContent = "Sin conexión"; $("#fRtt").textContent = "Sin datos"; }
+  $("#dropHint").textContent = on
+    ? "Cualquier tipo: Excel, Word, PDF, imágenes, ZIP. Se envían al instante."
+    : "Puedes elegirlos ya: se enviarán en cuanto el otro PC se conecte.";
+}
+function setRole(r) { S.role = r; $("#fRole").textContent = r === "host" ? "Anfitrión de la sala" : "Invitado"; }
+
+/* ============ Arranque ============ */
+async function init() {
+  $("#meName").textContent = S.myName;
+  let room = location.hash.slice(1).trim().toLowerCase();
+  if (!/^[a-z0-9]{6,32}$/.test(room)) { room = randomId(10); history.replaceState(null, "", "#" + room); }
+  S.room = room;
+  renderShare();
+  await loadConfig();
+  if (typeof Peer === "undefined") {
+    setStatus("error", "No se pudo cargar la librería de conexión. Revisa tu conexión a internet o un bloqueador de contenido y recarga.");
+    return;
+  }
+  if (S.forceRelay) log("Modo prueba: se fuerza el uso del servidor de relé (TURN).");
+  start();
+}
+
+async function loadConfig() {
+  try {
+    const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch("/api/config", { cache: "no-store", signal: ctrl.signal });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (Array.isArray(j.iceServers) && j.iceServers.length) S.iceServers = j.iceServers;
+    if (j.peer && j.peer.host) S.peerOpts = j.peer;
+    S.turnSource = j.source || "desconocido";
+    if (j.warning) log("Aviso del servidor: " + j.warning);
+  } catch (e) {
+    log("No se pudo leer /api/config (" + e.message + "). Se usa el relé público de respaldo.");
+  }
+  $("#fTurn").textContent = S.turnSource;
+  log("Servidores ICE: " + S.iceServers.map(s => [].concat(s.urls).join(", ")).join(" | "));
+}
+function peerOptions() {
+  return Object.assign({ debug: 1, config: { iceServers: S.iceServers, iceTransportPolicy: S.forceRelay ? "relay" : "all" } }, S.peerOpts);
+}
+
+function clearTimers() { clearTimeout(S.timers.retry); clearTimeout(S.timers.open); }
+function destroyPeer() { const p = S.peer; S.peer = null; if (p && !p.destroyed) { try { p.destroy(); } catch (_) {} } }
+
+/* Todos intentan ser anfitrión; si la sala ya tiene uno, entran como invitados. */
+function start() {
+  if (isOpen()) return;
+  clearTimers(); destroyPeer();
+  setStatus("connecting", "Conectando con el servidor de enlace…");
+  const p = new Peer(PREFIX + S.room, peerOptions());
+  S.peer = p;
+  p.on("open", () => {
+    if (S.peer !== p) return;
+    setRole("host");
+    setStatus("waiting", "Sala lista. Abre el enlace en el otro PC.");
+    log("Sala creada como anfitrión.");
+  });
+  p.on("connection", c => { if (S.peer === p) { log("Llega una conexión del otro PC."); setupConnection(c); } });
+  p.on("error", err => {
+    if (S.peer !== p) return;
+    if (err.type === "unavailable-id") { log("La sala ya tiene anfitrión: entro como invitado."); S.peer = null; try { p.destroy(); } catch (_) {} startGuest(); return; }
+    peerError(err);
+  });
+  p.on("disconnected", () => { if (S.peer === p && !p.destroyed) { log("Se perdió el servidor de enlace, reconectando…"); setTimeout(() => { try { p.reconnect(); } catch (_) {} }, 1500); } });
+}
+
+function startGuest() {
+  const p = new Peer(PREFIX + S.room + "-" + randomId(6), peerOptions());
+  S.peer = p;
+  p.on("open", () => { if (S.peer === p) { setRole("guest"); connectToHost(); } });
+  p.on("connection", c => { if (S.peer === p) setupConnection(c); });
+  p.on("error", err => {
+    if (S.peer !== p) return;
+    if (err.type === "peer-unavailable") { log("El anfitrión no responde todavía; reintento en 3 s."); setStatus("waiting", "Esperando al otro PC…"); scheduleRetry(); return; }
+    peerError(err);
+  });
+  p.on("disconnected", () => { if (S.peer === p && !p.destroyed && !isOpen()) { try { p.reconnect(); } catch (_) {} } });
+}
+
+function connectToHost() {
+  const p = S.peer; if (!p || p.destroyed) return;
+  setStatus("connecting", "Abriendo el túnel hacia el otro PC…");
+  const c = p.connect(PREFIX + S.room, { reliable: true, serialization: "raw" });
+  if (!c) { scheduleRetry(); return; }
+  setupConnection(c);
+}
+
+function scheduleRetry(ms = RETRY_MS) {
+  clearTimeout(S.timers.retry);
+  S.timers.retry = setTimeout(() => { if (!isOpen()) start(); }, ms);
+}
+
+function peerError(err) {
+  log("Error de enlace: " + err.type + " · " + (err.message || ""));
+  if (err.type === "browser-incompatible") { setStatus("error", "Este navegador no permite conexiones directas. Usa Chrome, Edge o Firefox actualizados."); return; }
+  if (isOpen()) return; // el canal de datos sigue vivo
+  setStatus("error", err.type === "network" || err.type === "server-error" || err.type === "socket-error"
+    ? "No hay conexión con el servidor de enlace. Reintentando…"
+    : "Falló la conexión. Reintentando…");
+  scheduleRetry(4000);
+}
+
+/* ============ Canal de datos ============ */
+function isOpen(c = S.conn) { return !!(c && c.open && c.dataChannel && c.dataChannel.readyState === "open"); }
+
+function setupConnection(c) {
+  if (S.conn && S.conn !== c) {
+    log("Nueva conexión: reemplaza a la anterior.");
+    const old = S.conn; S.conn = null; try { old.close(); } catch (_) {}
+  }
+  S.conn = c;
+  clearTimeout(S.timers.open);
+  S.timers.open = setTimeout(() => {
+    if (S.conn === c && !c.open) {
+      log("El canal no se abrió en 20 s. Las redes bloquean la conexión directa y el relé TURN no respondió.");
+      setStatus("error", "No se pudo atravesar la red. Reintentando… Si persiste, configura un servidor TURN (ver README).");
+      try { c.close(); } catch (_) {}
+      if (S.conn === c) S.conn = null;
+      scheduleRetry(1000);
+    }
+  }, OPEN_TIMEOUT);
+
+  const pc = c.peerConnection;
+  if (pc) {
+    pc.addEventListener("iceconnectionstatechange", () => {
+      log("Estado ICE: " + pc.iceConnectionState);
+      if (pc.iceConnectionState === "failed" && S.conn === c) { try { c.close(); } catch (_) {} }
+    });
+    pc.addEventListener("icecandidateerror", e => { if (e.url && /turn/.test(e.url)) log(`Relé ${e.url} no responde (${e.errorCode}).`); });
+  }
+  c.on("open", () => onOpen(c));
+  c.on("data", d => enqueueIncoming(c, d));
+  c.on("close", () => onClose(c));
+  c.on("error", e => log("Error del canal: " + (e.type || "") + " " + (e.message || e)));
+}
+
+function onOpen(c) {
+  if (S.conn !== c) return;
+  clearTimers();
+  S.lastSeen = Date.now();
+  log("Canal de datos abierto.");
+  setStatus("linked", "Túnel abierto. Confirmando al otro PC…");
+  sendCtl({ t: "hello", name: S.myName });
+  clearInterval(S.timers.beat);
+  S.timers.beat = setInterval(heartbeat, HEARTBEAT_MS);
+  setTimeout(updateRoute, 800);
+}
+
+function onClose(c) {
+  if (S.conn !== c) return;
+  S.conn = null; S.remoteName = null;
+  clearInterval(S.timers.beat);
+  log("El otro PC se desconectó.");
+  for (const w of [...waiters.values()]) w.rej(new Error("Conexión perdida"));
+  if (S.incoming) {
+    const it = S.incoming.item; S.incoming = null;
+    setItem(it, "Interrumpido: se reanudará si el otro PC reconecta", "warn");
+  }
+  if (S.role === "guest") { setStatus("waiting", "Se perdió la conexión. Reconectando…"); scheduleRetry(1500); }
+  else setStatus("waiting", "El otro PC salió. Esperando a que vuelva a abrir el enlace…");
+}
+
+function heartbeat() {
+  const c = S.conn; if (!isOpen(c)) return;
+  if (Date.now() - S.lastSeen > DEAD_MS) { log("Sin respuesta del otro PC en 25 s: cierro el canal."); try { c.close(); } catch (_) {} return; }
+  sendCtl({ t: "ping" });
+  updateRoute();
+}
+
+async function updateRoute() {
+  const pc = S.conn && S.conn.peerConnection; if (!pc) return;
+  try {
+    const st = await pc.getStats(); let pair = null;
+    st.forEach(r => { if (r.type === "transport" && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId); });
+    if (!pair) st.forEach(r => { if (!pair && r.type === "candidate-pair" && r.state === "succeeded" && (r.nominated || r.selected)) pair = r; });
+    if (!pair) return;
+    const l = st.get(pair.localCandidateId), r = st.get(pair.remoteCandidateId);
+    const lt = l && l.candidateType, rt = r && r.candidateType;
+    $("#fRoute").textContent = lt === "relay" || rt === "relay" ? "Por servidor de relé (redes distintas)"
+      : lt === "host" && rt === "host" ? "Directa, misma red" : "Directa por internet";
+    if (pair.currentRoundTripTime != null) $("#fRtt").textContent = Math.round(pair.currentRoundTripTime * 1000) + " ms";
+  } catch (_) {}
+}
+
+function sendCtl(obj) { if (isOpen()) { try { S.conn.send(JSON.stringify(obj)); } catch (e) { log("No se pudo enviar control: " + e.message); } } }
+
+function waitFor(t, id, ms) {
+  return new Promise((res, rej) => {
+    const key = t + ":" + id;
+    const to = setTimeout(() => { waiters.delete(key); rej(new Error(t === "accept" ? "El otro PC no respondió" : "Tiempo de espera agotado")); }, ms);
+    waiters.set(key, { res: v => { clearTimeout(to); waiters.delete(key); res(v); }, rej: e => { clearTimeout(to); waiters.delete(key); rej(e); } });
+  });
+}
+function resolveWaiter(t, id, v) { const w = waiters.get(t + ":" + id); if (w) w.res(v); }
+
+/* ============ Recepción ============ */
+let inChain = Promise.resolve();
+function enqueueIncoming(c, d) { inChain = inChain.then(() => handleData(c, d)).catch(e => log("Error al procesar datos: " + e.message)); }
+
+async function handleData(c, d) {
+  if (S.conn !== c) return;
+  S.lastSeen = Date.now();
+  if (typeof d === "string") { let m; try { m = JSON.parse(d); } catch (_) { return; } return handleCtl(m); }
+  let buf = null;
+  if (d instanceof ArrayBuffer) buf = d;
+  else if (ArrayBuffer.isView(d)) buf = d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength);
+  else if (d instanceof Blob) buf = await d.arrayBuffer();
+  if (buf) handleChunk(buf);
+}
+
+async function handleCtl(m) {
+  switch (m.t) {
+    case "hello":
+      S.remoteName = String(m.name || "Otro equipo").slice(0, 60);
+      log("Conectado con: " + S.remoteName);
+      setStatus("connected", "Conectado. Ya puedes enviar y recibir archivos.");
+      toast("Conectado con " + S.remoteName);
+      updateRoute(); pump();
+      break;
+    case "ping": sendCtl({ t: "pong" }); break;
+    case "meta": {
+      const id = String(m.id);
+      let it = S.items.get("in" + id) || addItem("in", id, m.name, m.size);
+      it.bytes = 0; it.start = Date.now(); it.chunks = []; it.type = m.type || "application/octet-stream";
+      setItem(it, "Recibiendo…");
+      S.incoming = { id, size: Number(m.size) || 0, item: it, lastAck: 0 };
+      sendCtl({ t: "accept", id });
+      break;
+    }
+    case "end": await finishIncoming(m); break;
+    case "accept": resolveWaiter("accept", m.id, true); break;
+    case "ack": {
+      const it = S.items.get("out" + m.id);
+      if (it) { it.confirmed = m.bytes; paint(it); }
+      break;
+    }
+    case "done": resolveWaiter("done", m.id, m); break;
+  }
+}
+
+function handleChunk(buf) {
+  const inc = S.incoming; if (!inc) { log("Llegó un fragmento sin archivo asociado; se ignora."); return; }
+  const it = inc.item;
+  it.chunks.push(buf); it.bytes += buf.byteLength;
+  if (it.bytes - inc.lastAck >= ACK_EVERY) { inc.lastAck = it.bytes; sendCtl({ t: "ack", id: inc.id, bytes: it.bytes }); }
+  paint(it);
+}
+
+async function finishIncoming(m) {
+  const inc = S.incoming; if (!inc || inc.id !== String(m.id)) return;
+  S.incoming = null;
+  const it = inc.item;
+  sendCtl({ t: "ack", id: inc.id, bytes: it.bytes });
+  const blob = new Blob(it.chunks, { type: it.type });
+  it.chunks = null;
+  let ok = blob.size === inc.size, hashOk = null;
+  if (!ok) log(`Tamaño incorrecto en ${it.name}: ${blob.size} de ${inc.size} bytes.`);
+  if (ok && m.hash) {
+    setItem(it, "Verificando que llegó completo…");
+    const h = await sha256(blob);
+    if (h) { hashOk = h === m.hash; ok = hashOk; }
+  }
+  sendCtl({ t: "done", id: inc.id, ok, bytes: blob.size, hashOk });
+  if (!ok) { setItem(it, "Llegó incompleto. Pide al otro PC que lo reenvíe.", "err"); return; }
+  if (it.url) URL.revokeObjectURL(it.url);
+  it.blob = blob; it.url = URL.createObjectURL(blob);   // se conserva mientras la página esté abierta
+  it.done = true;
+  setItem(it, hashOk ? "Recibido y verificado" : "Recibido", "good");
+  addDownloadButton(it);
+  $("#dlAll").disabled = false;
+  toast("Recibido: " + it.name);
+  if ($("#autoDl").checked) download(it);
+}
+
+function download(it) {
+  if (!it.url) return;
+  const a = document.createElement("a");
+  a.href = it.url; a.download = it.name || "archivo"; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ============ Envío ============ */
+function queueFiles(list) {
+  const files = Array.from(list || []);
+  if (!files.length) return;
+  for (const f of files) {
+    const id = randomId(12);
+    const it = addItem("out", id, f.name, f.size);
+    S.outQueue.push({ id, file: f, item: it });
+    setItem(it, isOpen() && S.remoteName ? "En cola" : "En cola: se enviará al conectar el otro PC", "warn");
+  }
+  pump();
+}
+
+async function pump() {
+  if (S.sending) return;
+  S.sending = true;
+  try {
+    while (S.outQueue.length && isOpen() && S.remoteName) {
+      const job = S.outQueue[0];
+      try { await sendFile(job); S.outQueue.shift(); }
+      catch (e) {
+        if (!isOpen()) { setItem(job.item, "Interrumpido: se reenviará al reconectar", "warn"); break; }
+        S.outQueue.shift(); job.item.el.classList.add("bad");
+        setItem(job.item, "Error: " + e.message, "err"); log(`Fallo al enviar ${job.file.name}: ${e.message}`);
+      }
+    }
+  } finally { S.sending = false; }
+}
+
+function chunkSize(c) {
+  const max = c.peerConnection && c.peerConnection.sctp && c.peerConnection.sctp.maxMessageSize;
+  return max && max > 0 ? Math.min(CHUNK_MAX, max) : 16384;
+}
+function drain(dc) {
+  return new Promise((res, rej) => {
+    dc.bufferedAmountLowThreshold = BUFFER_LOW;
+    const fin = ok => { dc.removeEventListener("bufferedamountlow", onLow); clearInterval(iv); ok ? res() : rej(new Error("Conexión perdida")); };
+    const onLow = () => fin(true);
+    dc.addEventListener("bufferedamountlow", onLow);
+    const iv = setInterval(() => { if (dc.readyState !== "open") fin(false); else if (dc.bufferedAmount <= BUFFER_LOW) fin(true); }, 200);
+  });
+}
+
+async function sendFile(job) {
+  const { file, item: it, id } = job;
+  const c = S.conn, dc = c.dataChannel, size = chunkSize(c);
+  it.sent = 0; it.confirmed = 0; paint(it);
+  const hashP = file.size <= HASH_LIMIT && crypto.subtle ? sha256(file).catch(() => null) : Promise.resolve(null);
+
+  setItem(it, "Avisando al otro PC…");
+  const accepted = waitFor("accept", id, 20000);
+  sendCtl({ t: "meta", id, name: file.name, size: file.size, type: file.type || "application/octet-stream" });
+  await accepted;
+  setItem(it, "Enviando…");
+  it.start = Date.now();
+
+  for (let off = 0; off < file.size; off += READ_BLOCK) {
+    const block = await file.slice(off, Math.min(off + READ_BLOCK, file.size)).arrayBuffer();
+    for (let i = 0; i < block.byteLength; i += size) {
+      if (!isOpen(c)) throw new Error("Conexión perdida");
+      if (dc.bufferedAmount > BUFFER_HIGH) await drain(dc);
+      const part = block.slice(i, i + size);
+      c.send(part);
+      it.sent += part.byteLength;
+    }
+    paint(it);
+  }
+  const hash = await hashP;
+  setItem(it, "Enviado. Esperando confirmación del otro PC…", "warn");
+  const done = waitFor("done", id, 10 * 60 * 1000);
+  sendCtl({ t: "end", id, hash });
+  const r = await done;
+  if (!r.ok) throw new Error(r.hashOk === false ? "llegó dañado; vuelve a enviarlo" : "el otro PC no lo recibió completo");
+  it.confirmed = file.size; paint(it);
+  it.el.classList.add("ok");
+  setItem(it, r.hashOk ? "Entregado y verificado en el otro PC" : "Entregado en el otro PC", "good");
+  log(`Entregado: ${file.name} (${fmtBytes(file.size)})`);
+}
+
+/* ============ Lista de archivos ============ */
+function addItem(dir, id, name, size) {
+  const list = dir === "out" ? $("#outList") : $("#inList");
+  const empty = list.querySelector(".empty"); if (empty) empty.remove();
+  const el = document.createElement("li"); el.className = "item";
+  const ext = extOf(name);
+  const extClass = /^(xls|xlsx|xlsm|csv|ods)$/.test(ext) ? "xls" : ext === "pdf" ? "pdf" : "";
+  el.innerHTML = `<div class="row"><div class="ext ${extClass}"></div><div class="meta"><div class="name"></div>
+    <div class="sub"><span class="size"></span>. <span class="st"></span></div></div><div class="act"></div></div>
+    <div class="bar"><i class="b1"></i><i class="b2"></i></div><div class="legend"><span class="l1"></span><span class="l2"></span></div>`;
+  el.querySelector(".ext").textContent = ext.toUpperCase().slice(0, 4);
+  el.querySelector(".name").textContent = name; el.querySelector(".name").title = name;
+  el.querySelector(".size").textContent = fmtBytes(size);
+  list.prepend(el);
+  const it = { id, dir, name: String(name || "archivo"), size: Number(size) || 0, el, sent: 0, confirmed: 0, bytes: 0, start: 0 };
+  S.items.set(dir + id, it);
+  paint(it);
+  return it;
+}
+function setItem(it, text, cls = "") { const st = it.el.querySelector(".st"); st.textContent = text; st.className = "st " + cls; }
+
+const dirty = new Set(); let raf = 0;
+function paint(it) { dirty.add(it); if (!raf) raf = requestAnimationFrame(flush); }
+function flush() {
+  raf = 0;
+  for (const it of dirty) {
+    const pct = v => it.size ? Math.min(100, v / it.size * 100) : (it.done || it.confirmed ? 100 : 0);
+    const secs = it.start ? Math.max(0.5, (Date.now() - it.start) / 1000) : 0;
+    if (it.dir === "out") {
+      it.el.querySelector(".b1").style.width = pct(it.sent) + "%";
+      it.el.querySelector(".b2").style.width = pct(it.confirmed) + "%";
+      it.el.querySelector(".l1").textContent = `Enviado ${Math.round(pct(it.sent))}%` + (secs && it.sent < it.size ? `, ${fmtBytes(it.sent / secs)}/s` : "");
+      it.el.querySelector(".l2").textContent = `Recibido por el otro PC ${Math.round(pct(it.confirmed))}%`;
+    } else {
+      it.el.querySelector(".b2").style.width = pct(it.bytes) + "%";
+      it.el.querySelector(".l1").textContent = `${fmtBytes(it.bytes)} de ${fmtBytes(it.size)}`;
+      it.el.querySelector(".l2").textContent = secs && it.bytes < it.size ? `${fmtBytes(it.bytes / secs)}/s` : "";
+    }
+  }
+  dirty.clear();
+}
+function addDownloadButton(it) {
+  const act = it.el.querySelector(".act"); act.textContent = "";
+  const b = document.createElement("button"); b.className = "primary sm"; b.textContent = "Descargar";
+  b.addEventListener("click", () => download(it));
+  act.appendChild(b); it.el.classList.add("ok");
+}
+
+/* ============ Compartir ============ */
+function shareUrl() { return location.origin + location.pathname + "#" + S.room; }
+function renderShare() {
+  $("#shareLink").value = shareUrl();
+  $("#roomCode").textContent = S.room;
+  const q = $("#qr"); q.textContent = "";
+  if (window.QRCode && location.protocol.startsWith("http")) {
+    try { new QRCode(q, { text: shareUrl(), width: 120, height: 120, colorDark: "#15123a", colorLight: "#ffffff" }); } catch (_) {}
+  }
+}
+async function copyLink() {
+  const v = shareUrl();
+  try { await navigator.clipboard.writeText(v); }
+  catch (_) { const i = $("#shareLink"); i.select(); document.execCommand("copy"); }
+  toast("Enlace copiado");
+}
+
+/* ============ Eventos de la interfaz ============ */
+$("#copyBtn").addEventListener("click", copyLink);
+$("#newRoom").addEventListener("click", () => { location.hash = randomId(10); });
+window.addEventListener("hashchange", () => location.reload());
+$("#fileInput").addEventListener("change", e => { queueFiles(e.target.files); e.target.value = ""; });
+const drop = $("#drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => queueFiles(e.dataTransfer && e.dataTransfer.files));
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => { e.preventDefault(); if (!drop.contains(e.target)) queueFiles(e.dataTransfer && e.dataTransfer.files); });
+$("#dlAll").addEventListener("click", async () => {
+  for (const it of S.items.values()) if (it.dir === "in" && it.url) { download(it); await new Promise(r => setTimeout(r, 400)); }
+});
+window.addEventListener("beforeunload", e => { if (S.sending || S.incoming) { e.preventDefault(); e.returnValue = ""; } });
+window.addEventListener("pagehide", () => { try { S.conn && S.conn.close(); } catch (_) {} try { S.peer && S.peer.destroy(); } catch (_) {} });
+
+init();
+</script>
+</body>
+</html>
