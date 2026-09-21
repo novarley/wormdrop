@@ -14,8 +14,35 @@ let MODE = process.env.RELAY_ACCESS || null; // "private" o "public"; se detecta
 
 function httpError(status, message) { return Object.assign(new Error(message), { status }); }
 
+// Credenciales del almacén Blob. Vercel puede conectarlo de dos formas:
+//  1) Token clásico: BLOB_READ_WRITE_TOKEN (o con otro prefijo, p. ej. MIBLOB_READ_WRITE_TOKEN)
+//  2) Almacenes nuevos con OIDC: solo añade el id del almacén, p. ej. BLOB_READ_WRITE_TOKEN_STORE_ID
+//     o BLOB_STORE_ID, y el token OIDC llega en cada petición en la cabecera x-vercel-oidc-token.
+function findEnv(test) {
+  for (const [k, v] of Object.entries(process.env)) if (typeof v === "string" && v.trim() && test(k, v.trim())) return v.trim();
+  return null;
+}
+function blobEnvNames() {
+  return Object.keys(process.env).filter(k => /BLOB|STORE_ID|OIDC/i.test(k));
+}
+function credentials(req) {
+  const token = process.env.BLOB_READ_WRITE_TOKEN ||
+    findEnv((k, v) => /READ_WRITE_TOKEN$/.test(k) && v.startsWith("vercel_blob_rw_"));
+  if (token) return { token };
+  const storeId = process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN_STORE_ID ||
+    findEnv((k, v) => /STORE_ID$/.test(k) && /BLOB/i.test(k)) ||
+    findEnv((k, v) => /STORE_ID$/.test(k) && v.startsWith("store_"));
+  if (storeId) {
+    const oidc = req.headers && req.headers["x-vercel-oidc-token"];
+    return oidc ? { storeId, oidcToken: String(oidc) } : { storeId };
+  }
+  return null;
+}
+
+let CREDS = {};
+
 async function withAccess(fn) {
-  const modes = MODE ? [MODE, MODE === "private" ? "public" : "private"] : ["private", "public"];
+  const modes = MODE ? [MODE, MODE === "private" ? "public" : "private"] : ["public", "private"];
   let last;
   for (const m of modes) {
     try { const r = await fn(m); MODE = m; return r; }
@@ -35,7 +62,7 @@ async function readBody(req, limit) {
 }
 
 async function readBlob(pathname) {
-  const r = await withAccess(m => get(pathname, { access: m, useCache: false }));
+  const r = await withAccess(m => get(pathname, { ...CREDS, access: m, useCache: false }));
   if (!r || r.statusCode !== 200 || !r.stream) throw httpError(404, "Archivo no encontrado o ya expiró");
   return Buffer.from(await new Response(r.stream).arrayBuffer());
 }
@@ -43,7 +70,7 @@ async function readBlob(pathname) {
 async function listAll(prefix) {
   const out = []; let cursor;
   do {
-    const r = await list({ prefix, cursor, limit: 1000 });
+    const r = await list({ ...CREDS, prefix, cursor, limit: 1000 });
     out.push(...r.blobs);
     cursor = r.hasMore ? r.cursor : undefined;
   } while (cursor);
@@ -69,16 +96,20 @@ async function listRoom(base) {
       files.push(m);
     } catch (e) { console.error("manifest", id, e.message); }
   }
-  if (expired.length) { try { await del(expired); } catch (e) { console.error("limpieza", e.message); } }
+  if (expired.length) { try { await del(expired, CREDS); } catch (e) { console.error("limpieza", e.message); } }
   return files.sort((a, b) => b.uploadedAt - a.uploadedAt);
 }
 
 module.exports = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      throw httpError(503, "La sala en la nube no está activada. En Vercel: Storage, crear Blob, conectarlo al proyecto y hacer Redeploy.");
+    const creds = credentials(req);
+    if (!creds) {
+      const names = blobEnvNames();
+      throw httpError(503, "No encuentro las credenciales del almacén Blob. Conecta el Blob al proyecto y haz Redeploy. " +
+        (names.length ? "Variables vistas: " + names.join(", ") : "No hay ninguna variable de Blob en este despliegue: falta el Redeploy."));
     }
+    CREDS = creds;
     const q = new URL(req.url, "http://localhost").searchParams;
     const action = q.get("action") || "";
     const room = (q.get("room") || "").toLowerCase();
@@ -91,6 +122,11 @@ module.exports = async (req, res) => {
       return `${base}${id}/p${String(n).padStart(4, "0")}.bin`;
     };
 
+    // Diagnóstico: /api/relay?room=xxxxxx&action=check (no muestra valores secretos)
+    if (req.method === "GET" && action === "check") {
+      await listAll(base);
+      return res.status(200).json({ ok: true, auth: CREDS.token ? "token" : "oidc", oidcHeader: !!(req.headers && req.headers["x-vercel-oidc-token"]), vars: blobEnvNames(), access: MODE });
+    }
     // Listar archivos de la sala
     if (req.method === "GET" && !action) {
       return res.status(200).json({ files: await listRoom(base), maxBytes: MAX_BYTES, partSize: PART_SIZE, ttlMs: TTL_MS });
@@ -106,7 +142,7 @@ module.exports = async (req, res) => {
     if (req.method === "POST" && action === "part") {
       const path = partPath();
       const body = await readBody(req, PART_SIZE + 1024);
-      await withAccess(m => put(path, body, { access: m, addRandomSuffix: false, allowOverwrite: true, contentType: "application/octet-stream" }));
+      await withAccess(m => put(path, body, { ...CREDS, access: m, addRandomSuffix: false, allowOverwrite: true, contentType: "application/octet-stream" }));
       return res.status(200).json({ ok: true, n, bytes: body.length });
     }
     // Cerrar la subida: guarda el manifiesto y el archivo aparece para el otro PC
@@ -128,19 +164,21 @@ module.exports = async (req, res) => {
         from: String(m.from || "").slice(0, 60),
         uploadedAt: Date.now(),
       };
-      await withAccess(a => put(`${base}${m.id}/manifest.json`, JSON.stringify(manifest), { access: a, addRandomSuffix: false, allowOverwrite: true, contentType: "application/json" }));
+      await withAccess(a => put(`${base}${m.id}/manifest.json`, JSON.stringify(manifest), { ...CREDS, access: a, addRandomSuffix: false, allowOverwrite: true, contentType: "application/json" }));
       return res.status(200).json({ ok: true, file: manifest });
     }
     // Borrar un archivo
     if (req.method === "DELETE") {
       if (!ID_RE.test(id)) throw httpError(400, "Archivo no válido");
       const blobs = await listAll(`${base}${id}/`);
-      if (blobs.length) await del(blobs.map(b => b.url));
+      if (blobs.length) await del(blobs.map(b => b.url), CREDS);
       return res.status(200).json({ ok: true });
     }
     throw httpError(405, "Operación no permitida");
   } catch (e) {
     console.error(e);
-    res.status(e.status || 500).json({ error: e.status ? e.message : "Error del almacenamiento: " + e.message });
+    let msg = e.status ? e.message : "Error del almacenamiento: " + e.message;
+    if (!e.status && /oidc|credential|token/i.test(e.message)) msg += " Revisa en Vercel, Settings, Security, que OIDC Federation esté activado y vuelve a desplegar.";
+    res.status(e.status || 500).json({ error: msg });
   }
 };
